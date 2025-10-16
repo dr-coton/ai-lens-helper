@@ -1,0 +1,21 @@
+# Default configuration for ai-lens-helper training and inference pipelines
+seed: 42
+img_size: 224
+backbone: vit_b16
+optimizer: adamw
+lr: 0.0003
+weight_decay: 0.05
+scheduler: cosine
+loss: arcface
+embedding_dim: 512
+augment:
+  random_resized_crop: true
+  color_jitter: 0.2
+  horizontal_flip: true
+  gaussian_blur: true
+reject:
+  threshold: 0.62
+  min_top1_margin: 0.12
+export:
+  onnx: true
+  opset: 17
