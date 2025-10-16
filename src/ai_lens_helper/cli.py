@@ -16,6 +16,12 @@ from .train.engine import TrainingEngine, TrainingOptions
 from .train.export import ExportOptions, ModelExporter
 from .infer.runner import BatchInferenceOptions, InferenceOptions
 from .infer.index import IndexBuilder, IndexOptions
+from .data.crawler import (
+    load_crawl_specs_from_json,
+    save_crawl_report,
+)
+from .data.selenium_crawler import SeleniumImageCrawler
+from .data.naver_crawler import NaverImageCrawler
 
 app = typer.Typer(
     help="Hybrid classification + retrieval helper for museum exhibit recognition.",
@@ -135,6 +141,120 @@ def export(
     options = ExportOptions(ckpt_path=ckpt, onnx_path=onnx, opset=opset)
     exporter = ModelExporter(options=options)
     console.print(exporter.export())
+
+
+@app.command("collect-data")
+def collect_data(
+    spec_json: Path = typer.Argument(..., exists=True, resolve_path=True),
+    output_root: Path = typer.Option(
+        Path("./data"), resolve_path=True, help="Root directory for downloaded images"
+    ),
+    num_images: int = typer.Option(20, min=1, max=100, help="Number of images per item"),
+    headless: bool = typer.Option(True, help="Run browser in headless mode"),
+    scroll_pause: float = typer.Option(1.0, min=0.5, max=5.0, help="Pause after scrolling (seconds)"),
+    download_delay: float = typer.Option(
+        0.3, min=0.1, max=2.0, help="Delay between downloads (seconds)"
+    ),
+    engine: str = typer.Option(
+        "naver", help="Search engine to use: 'naver' or 'google'"
+    ),
+    report: Optional[Path] = typer.Option(None, resolve_path=True, help="Save crawl report to JSON"),
+) -> None:
+    """Collect test images by crawling image search engines using Selenium.
+
+    The spec_json should contain place-item mappings in one of these formats:
+
+    Simple format:
+    {
+        "place_A": ["item1", "item2"],
+        "place_B": ["item3", "item4"]
+    }
+
+    Detailed format (with custom num_images per item):
+    {
+        "place_A": [
+            {"item": "item1", "num_images": 20},
+            {"item": "item2", "num_images": 15}
+        ]
+    }
+
+    This command uses Selenium WebDriver to:
+    - Handle dynamic JavaScript content
+    - Scroll and load more images
+    - Extract high-resolution image URLs
+    - Download images with proper error handling
+
+    Supported engines:
+    - naver: Naver Images (recommended for Korean content)
+    - google: Google Images
+    """
+    # Load crawl specifications
+    specs = load_crawl_specs_from_json(spec_json)
+
+    # Override num_images if provided via CLI (only for simple format)
+    for spec in specs:
+        if spec.num_images == 20:  # Default value, can be overridden
+            spec.num_images = num_images
+
+    # Show summary
+    console.print(f"[bold cyan]Starting {engine.title()}-based data collection[/bold cyan]")
+    console.print(f"Total items: {len(specs)}")
+    console.print(f"Output root: {output_root}")
+    console.print(f"Images per item: {num_images} (default)")
+    console.print(f"Headless mode: {headless}")
+    console.print()
+
+    # Create appropriate crawler
+    if engine.lower() == "naver":
+        crawler = NaverImageCrawler(
+            output_root=output_root,
+            headless=headless,
+            scroll_pause=scroll_pause,
+            download_delay=download_delay,
+        )
+    elif engine.lower() == "google":
+        crawler = SeleniumImageCrawler(
+            output_root=output_root,
+            headless=headless,
+            scroll_pause=scroll_pause,
+            download_delay=download_delay,
+        )
+    else:
+        console.print(f"[bold red]Unknown engine: {engine}[/bold red]")
+        console.print("Supported engines: naver, google")
+        return
+
+    results = crawler.crawl_batch(specs)
+
+    # Print summary table
+    table = Table(title="Collection Summary", box=box.SIMPLE_HEAVY)
+    table.add_column("Place", justify="left")
+    table.add_column("Item", justify="left")
+    table.add_column("Downloaded", justify="right")
+    table.add_column("Failed", justify="right")
+
+    for result in results:
+        table.add_row(
+            result.place,
+            result.item,
+            str(result.downloaded),
+            str(result.failed),
+        )
+
+    console.print(table)
+
+    # Print overall statistics
+    total_downloaded = sum(r.downloaded for r in results)
+    total_failed = sum(r.failed for r in results)
+    console.print()
+    console.print(f"[bold green]Total downloaded: {total_downloaded}[/bold green]")
+    if total_failed > 0:
+        console.print(f"[bold yellow]Total failed: {total_failed}[/bold yellow]")
+
+    # Save report if requested
+    if report:
+        save_crawl_report(results, report)
+        console.print(f"[bold cyan]Report saved to: {report}[/bold cyan]")
 
 
 if __name__ == "__main__":  # pragma: no cover - script entry point
