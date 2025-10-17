@@ -22,6 +22,7 @@ from .data.crawler import (
 )
 from .data.selenium_crawler import SeleniumImageCrawler
 from .data.naver_crawler import NaverImageCrawler
+from .data.fast_naver_crawler import FastNaverImageCrawler
 
 app = typer.Typer(
     help="Hybrid classification + retrieval helper for museum exhibit recognition.",
@@ -130,6 +131,71 @@ def build_index(
     )
 
 
+@app.command("build-clip-index")
+def build_clip_index(
+    data_root: Path = typer.Option(..., exists=True, resolve_path=True, file_okay=False),
+    place: str = typer.Option(..., help="Place identifier to index"),
+    save: Path = typer.Option(..., resolve_path=True, help="Output path for index (without extension)"),
+    device: str = typer.Option("cpu", help="Device to use (cpu or cuda)"),
+    yolo_model: str = typer.Option("yolov8n.pt", help="YOLO model variant (yolov8n/s/m/l/x)"),
+    clip_model: str = typer.Option("ViT-B-16", help="CLIP model architecture"),
+) -> None:
+    """Build YOLO+CLIP based FAISS index from training data.
+
+    This command:
+    1. Loads all images from data_root/{place}/{item}/*.jpg
+    2. Uses YOLO to detect and crop exhibits
+    3. Extracts CLIP embeddings for each image
+    4. Builds a FAISS index for fast similarity search
+
+    The output will be two files:
+    - {save}.faiss: FAISS index for nearest neighbor search
+    - {save}.json: Metadata with item names and embeddings
+    """
+    from .models.yolo_clip import YOLOCLIPPipeline
+    from .infer.clip_index import CLIPIndexBuilder
+
+    console.print(f"[bold cyan]Building YOLO+CLIP index for place '{place}'[/bold cyan]")
+    console.print(f"Data root: {data_root}")
+    console.print(f"Device: {device}")
+    console.print(f"YOLO model: {yolo_model}")
+    console.print(f"CLIP model: {clip_model}")
+    console.print()
+
+    # Initialize pipeline
+    console.print("Initializing YOLO+CLIP pipeline...")
+    pipeline = YOLOCLIPPipeline(
+        yolo_model=yolo_model,
+        clip_model=clip_model,
+        clip_pretrained="openai",
+        device=device
+    )
+
+    # Build index
+    console.print(f"Processing images from {data_root}/{place}...")
+    builder = CLIPIndexBuilder(pipeline=pipeline)
+    index_items = builder.build_from_directory(data_root=data_root, place=place)
+
+    if not index_items:
+        console.print("[bold red]No items found to index![/bold red]")
+        return
+
+    # Save index
+    builder.save_index(
+        index_items=index_items,
+        output_path=save,
+        place=place,
+        metadata={"reject_threshold": 0.7}
+    )
+
+    total_images = sum(item.image_count for item in index_items.values())
+    console.print()
+    console.print(f"[bold green]✓ Index built successfully[/bold green]")
+    console.print(f"  Place: {place}")
+    console.print(f"  Items: {len(index_items)}")
+    console.print(f"  Total images: {total_images}")
+
+
 @app.command()
 def export(
     ckpt: Path = typer.Option(..., exists=True, resolve_path=True),
@@ -206,6 +272,7 @@ def collect_data(
 
     # Create appropriate crawler
     if engine.lower() == "naver":
+        # Use Selenium-based crawler with proxy URL extraction
         crawler = NaverImageCrawler(
             output_root=output_root,
             headless=headless,

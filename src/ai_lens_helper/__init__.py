@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from .infer.runner import InferenceResult, InferenceRunner
 from .utils.io import load_yaml_config
@@ -18,6 +19,9 @@ class Lens:
     At this early stage the implementation simply wires together the inference
     runner and performs basic configuration loading so downstream code already
     has the right extension points available.
+
+    The Lens class automatically detects the model type (color-based or YOLO+CLIP)
+    based on the index metadata and uses the appropriate runner.
     """
 
     def __init__(
@@ -35,7 +39,40 @@ class Lens:
             self.config = load_yaml_config(config_path)
         if overrides:
             self.config.update(overrides)
-        self.runner = InferenceRunner(model_path=self.model_path, device=self.device, config=self.config)
+
+        # Auto-detect model type from metadata
+        model_type = self._detect_model_type(self.model_path)
+
+        if model_type == "yolo_clip":
+            from .infer.clip_runner import CLIPInferenceRunner
+            self.runner: Union[InferenceRunner, CLIPInferenceRunner] = CLIPInferenceRunner(
+                model_path=self.model_path,
+                device=self.device,
+                config=self.config
+            )
+        else:
+            # Default to color-based runner
+            self.runner = InferenceRunner(
+                model_path=self.model_path,
+                device=self.device,
+                config=self.config
+            )
+
+    def _detect_model_type(self, model_path: Path) -> str:
+        """Detect model type from index metadata."""
+        json_path = model_path.with_suffix(".json")
+
+        if not json_path.exists():
+            # Assume color-based for backward compatibility
+            return "color"
+
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                metadata = data.get("metadata", {})
+                return metadata.get("model_type", "color")
+        except Exception:
+            return "color"
 
     def infer(
         self,

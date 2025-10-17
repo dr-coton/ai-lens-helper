@@ -47,37 +47,71 @@ pip install -e .[dev]
 
 ## 🚀 빠른 시작 (Quickstart)
 
-### 1) 학습
+### 0) GUI 애플리케이션 (추천!)
+
+**YOLO+CLIP 기반 전시품 인식 시스템을 GUI에서 쉽게 사용하세요!**
 
 ```bash
-ai-lens train \
+# GUI 실행
+python3 gui_app.py
+# 또는
+./run_gui.sh
+```
+
+**기능:**
+- 📚 **Tab 1: 인덱스 빌드 (학습)** - 수집한 이미지로 YOLO+CLIP 인덱스 생성
+- 🔍 **Tab 2: Inference (테스트)** - 실시간 이미지 테스트 및 결과 확인
+- 🤖 **Tab 3: OpenAI Vision** - OpenAI GPT-4 Vision API로 즉시 테스트 (학습 불필요)
+
+**자세한 사용법:**
+- [GUI_USAGE.md](./GUI_USAGE.md) - GUI 전체 사용법
+- [OPENAI_VISION_GUIDE.md](./OPENAI_VISION_GUIDE.md) - OpenAI Vision API 가이드
+
+### 1) CLI로 YOLO+CLIP 인덱스 빌드
+
+**YOLO+CLIP 모델 사용 (권장):**
+
+```bash
+# 인덱스 빌드
+ai-lens build-clip-index \
   --data-root ./data \
-  --place A --place B --place C \
-  --backbone vit_b16 \
-  --epochs 20 --batch-size 32 \
-  --save-dir ./runs/2025-10-16
+  --place "경복궁" \
+  --save ./indexes/경복궁_clip \
+  --device cpu \
+  --yolo-model yolov8n.pt \
+  --clip-model ViT-B-16
 ```
 
 옵션 요약:
+- `--data-root`: 데이터 루트 경로 (data/{place}/{item}/*.jpg 구조)
+- `--place`: 장소명 (예: "경복궁", "국립중앙박물관")
+- `--save`: 저장 경로 (확장자 제외, .json/.faiss 자동 생성)
+- `--device`: `cpu` 또는 `cuda`
+- `--yolo-model`: YOLO 모델 크기 (`yolov8n.pt`~`yolov8l.pt`)
+- `--clip-model`: CLIP 모델 (`ViT-B-16` 권장)
 
-- `--data-root`: 데이터 루트 경로
-- `--place`: 대상 장소(여러 개 가능)
-- `--backbone`: `vit_b16|resnet50|efficientnet_b3|convnext_tiny`
-- `--epochs`, `--batch-size`, `--lr`, `--img-size`
-- `--embedding`: 임베딩 차원 (예: 512)
-- `--loss`: `ce|arcface|triplet`
-- `--export-onnx`: ONNX 내보내기 여부
+**기존 Color-based 모델 (프로토타입):**
 
-### 2) 추론 (단일 이미지)
+```bash
+ai-lens build-index \
+  --model model.json \
+  --data-root ./data \
+  --place A \
+  --save ./A.index
+```
+
+### 2) Inference (단일 이미지)
 
 ```bash
 ai-lens infer \
-  --model ./runs/2025-10-16/best.ckpt \
-  --place A \
+  --model ./indexes/경복궁_clip.json \
+  --place "경복궁" \
   --image ./sample.jpg \
-  --reject-threshold 0.62 \
-  --topk 3
+  --reject-threshold 0.7 \
+  --topk 5
 ```
+
+**참고:** 모델 타입(YOLO+CLIP vs Color-based)은 자동 감지됩니다.
 
 출력 예시(JSON):
 
@@ -199,3 +233,10 @@ export:
 #### AI 이미지 수집 CLI
 
 ai-lens collect-data museum_spec.json --num-images 20 --output-root ./data --engine naver --headless --report crawl_report.json
+
+ai-lens collect-data museum_spec.json \
+ --num-images 20 \
+ --output-root ./data \
+ --engine naver \
+ --headless \
+ --report crawl_report.json
